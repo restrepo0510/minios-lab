@@ -9,8 +9,8 @@ const WS_PORT = parseInt(process.env.WS_PORT || '8080');
 // Clean up stale socket file from a previous run
 try { fs.unlinkSync(SOCK_PATH); } catch { /* not exist: ok */ }
 
-const wss = new WebSocketServer({ port: WS_PORT });
-console.log(`[bridge] WebSocket escuchando en ws://localhost:${WS_PORT}`);
+const wss = new WebSocketServer({ host: '0.0.0.0', port: WS_PORT });
+console.log(`[bridge] WebSocket escuchando en ws://0.0.0.0:${WS_PORT}`);
 
 // AF_UNIX server: scheduler (miniOS) connects here to stream events.
 // Accepts multiple sequential connections (reconnects work automatically).
