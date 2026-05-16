@@ -195,21 +195,30 @@ static void cmd_runpair(const char *name) {
 //   miniOS> run programs/bin/countdown 10
 // ============================================================
 static void cmd_run(const char *path, const char *arg) {
-    // Paso 1. Si path es NULL o vacio, imprimir mensaje de uso y retornar:
-    //         "Uso: run <binario> [argumento]"
 
-    // Paso 2. Validar que el archivo existe y es ejecutable:
-    //         access(path, X_OK) == 0. Si no, imprimir error y retornar.
+    // Paso 1
+    if (path == NULL || strlen(path) == 0) {
+        printf("Uso: run <binario> [argumento]\n");
+        return;
+    }
 
-    // Paso 3. Crear el proceso:
-    //         int idx = scheduler_create_process(path, arg);
-    //         Si idx < 0, retornar (el scheduler ya imprimio el error).
+    // Paso 2
+    if (access(path, X_OK) != 0) {
+        printf("Error: '%s' no existe o no es ejecutable.\n", path);
+        return;
+    }
 
-    // Paso 4. Si el scheduler NO esta corriendo Y la ready queue NO esta vacia,
-    //         arrancar el scheduler con timer_get_slice() como slice:
-    //         scheduler_start(timer_get_slice());
+    // Paso 3
+    int idx = scheduler_create_process(path, arg);
 
-    (void)path; (void)arg;  // silence unused while unimplemented
+    if (idx < 0) {
+        return;
+    }
+
+    // Paso 4
+    if (!scheduler_is_running() && !rq_is_empty()) {
+        scheduler_start(timer_get_slice());
+    }
 }
 
 
@@ -230,6 +239,28 @@ static void cmd_run(const char *path, const char *arg) {
 // rq_print() (que imprime algo como "Ready Queue: PID 1235 -> PID 1234").
 // ============================================================
 static void cmd_ps(void) {
+
+    // Paso 1
+    block_alarm();
+
+    // Paso 2
+    if (process_count == 0) {
+        printf("No hay procesos.\n");
+        unblock_alarm();
+        return;
+    }
+
+    // Paso 3
+    printf("\n");
+    pcb_print_table();
+
+    // Paso 4
+    printf("\n");
+    rq_print();
+
+    // Paso 5
+    unblock_alarm();
+}
     // Paso 1. block_alarm() para proteger la lectura de process_table.
 
     // Paso 2. Si process_count == 0: imprimir "No hay procesos." y retornar
@@ -244,7 +275,7 @@ static void cmd_ps(void) {
     // Pista: puedes implementar esto desde cero con tu propio formato
     // si prefieres. Los campos del PCB estan en pcb_t (ver pcb.h):
     //   pid, name, state, cpu_time_ms, wait_time_ms, context_switches
-}
+
 
 
 // ============================================================
@@ -259,6 +290,58 @@ static void cmd_ps(void) {
 // inmediatamente y que `ps` refleje el cambio al instante.
 // ============================================================
 static void cmd_kill_proc(const char *arg) {
+
+    // Paso 1
+    if (arg == NULL || strlen(arg) == 0) {
+        printf("Uso: kill <pid>\n");
+        return;
+    }
+
+    // Paso 2
+    int target_pid = atoi(arg);
+
+    if (target_pid <= 0) {
+        printf("PID invalido.\n");
+        return;
+    }
+
+    // Paso 3
+    block_alarm();
+
+    int found = 0;
+
+    // Paso 4
+    for (int i = 0; i < process_count; i++) {
+
+        if (process_table[i].pid == target_pid &&
+            process_table[i].state != PROC_TERMINATED) {
+
+            found = 1;
+
+            kill(target_pid, SIGKILL);
+
+            int status;
+            waitpid(target_pid, &status, 0);
+
+            process_table[i].state = PROC_TERMINATED;
+
+            rq_remove(i);
+
+            printf("Proceso PID %d terminado.\n", target_pid);
+
+            break;
+        }
+    }
+
+    // Paso 5
+    if (!found) {
+        printf("Proceso PID %d no encontrado.\n", target_pid);
+    }
+
+    // Paso 6
+    unblock_alarm();
+}
+
     // Paso 1. Si arg es NULL o vacio, imprimir "Uso: kill <pid>" y retornar.
 
     // Paso 2. Convertir arg a entero con atoi. Si <= 0, imprimir "PID invalido"
@@ -279,8 +362,6 @@ static void cmd_kill_proc(const char *arg) {
 
     // Paso 6. unblock_alarm() al terminar.
 
-    (void)arg;  // silence unused while unimplemented
-}
 
 
 // ============================================================
@@ -305,6 +386,56 @@ static void cmd_kill_proc(const char *arg) {
 //     Avg espera:            230.5 ms
 // ============================================================
 static void cmd_stats(void) {
+
+    // Paso 1
+    block_alarm();
+
+    // Paso 2
+    int active = 0;
+    int terminated = 0;
+
+    double total_cpu = 0;
+    double total_wait = 0;
+
+    int total_switches = 0;
+
+    // Paso 3
+    for (int i = 0; i < process_count; i++) {
+
+        if (process_table[i].state == PROC_TERMINATED) {
+            terminated++;
+        } else {
+            active++;
+        }
+
+        total_cpu += process_table[i].cpu_time_ms;
+        total_wait += process_table[i].wait_time_ms;
+        total_switches += process_table[i].context_switches;
+    }
+
+    // Paso 4
+    printf("\n=== Estadisticas del Scheduler ===\n");
+
+    printf("  Procesos activos:      %d\n", active);
+    printf("  Procesos terminados:   %d\n", terminated);
+    printf("  Time slice actual:     %d ms\n", timer_get_slice());
+    printf("  CPU total acumulado:   %.1f ms\n", total_cpu);
+    printf("  Context switches:      %d\n", total_switches);
+
+    if (process_count > 0) {
+
+        printf("  Avg CPU por proceso:   %.1f ms\n",
+               total_cpu / process_count);
+
+        printf("  Avg espera:            %.1f ms\n",
+               total_wait / process_count);
+    }
+
+    printf("\n");
+
+    // Paso 5
+    unblock_alarm();
+}
     // Paso 1. block_alarm() para proteger la lectura.
 
     // Paso 2. Declarar acumuladores:
@@ -324,7 +455,7 @@ static void cmd_stats(void) {
     //         (total_cpu / process_count) y (total_wait / process_count).
 
     // Paso 5. unblock_alarm().
-}
+
 
 
 // ============================================================
